@@ -50,7 +50,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         /// <summary>
         /// Gets ending time of the analysis period
         /// </summary>
-        public DateTime AnalysisEndTimeUtc { get; }
+        public DateTime AnalysisEndTimeUtc { get; private set; }
 
         /// <summary>
         /// Gets the initial values. These are values of price/volatility at the time the insight was generated
@@ -122,6 +122,12 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
             if (values.TimeUtc >= Insight.CloseTimeUtc)
             {
                 InsightPeriodClosed = true;
+                if (Insight.Period == Time.EndOfTimeTimeSpan)
+                {
+                    // Special case, see OrderBasedInsightGenerator
+                    AnalysisEndTimeUtc = Insight.CloseTimeUtc;
+                    Insight.Period = Insight.CloseTimeUtc - Insight.GeneratedTimeUtc;
+                }
             }
 
             CurrentValues = values;
@@ -165,6 +171,10 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
             if (scoreType == InsightScoreType.Magnitude)
             {
                 return Insight.Magnitude.HasValue;
+            }
+            else if (scoreType == InsightScoreType.Direction)
+            {
+                return Insight.Direction != InsightDirection.Flat;
             }
 
             return true;
