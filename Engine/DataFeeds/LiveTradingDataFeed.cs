@@ -210,6 +210,12 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         Tiingo.SetAuthCode(Config.Get("tiingo-auth-token"));
                     }
 
+                    if (!USEnergyInformation.IsAuthCodeSet)
+                    {
+                        // we're not using the SubscriptionDataReader, so be sure to set the auth token here
+                        USEnergyInformation.SetAuthCode(Config.Get("us-energy-information-auth-token"));
+                    }
+
                     var factory = new LiveCustomDataSubscriptionEnumeratorFactory(_timeProvider);
                     var enumeratorStack = factory.CreateEnumerator(request, _dataProvider);
 
@@ -404,12 +410,17 @@ namespace QuantConnect.Lean.Engine.DataFeeds
             {
                 Log.Trace("LiveTradingDataFeed.CreateUniverseSubscription(): Creating coarse universe: " + config.Symbol.ToString());
 
+                // we subscribe using a normalized symbol, without a random GUID,
+                // since the ticker plant will send the coarse data using this symbol
+                var normalizedSymbol = CoarseFundamental.CreateUniverseSymbol(config.Symbol.ID.Market, false);
+
                 // since we're binding to the data queue exchange we'll need to let him
                 // know that we expect this data
-                _dataQueueHandler.Subscribe(_job, new[] {request.Security.Symbol});
+                _dataQueueHandler.Subscribe(_job, new[] { normalizedSymbol });
 
                 var enqueable = new EnqueueableEnumerator<BaseData>();
-                _exchange.SetDataHandler(config.Symbol, data =>
+                // We `AddDataHandler` not `Set` so we can have multiple handlers for the coarse data
+                _exchange.AddDataHandler(normalizedSymbol, data =>
                 {
                     enqueable.Enqueue(data);
                 });

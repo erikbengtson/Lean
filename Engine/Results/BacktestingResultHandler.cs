@@ -29,6 +29,7 @@ using QuantConnect.Packets;
 using QuantConnect.Statistics;
 using QuantConnect.Util;
 using System.IO;
+using QuantConnect.Lean.Engine.Alphas;
 using QuantConnect.Securities;
 
 namespace QuantConnect.Lean.Engine.Results
@@ -56,7 +57,7 @@ namespace QuantConnect.Lean.Engine.Results
         private readonly object _runtimeLock = new object();
         private readonly Dictionary<string, string> _runtimeStatistics = new Dictionary<string, string>();
         private double _daysProcessed;
-        private double _lastDaysProcessed = 1;
+        private double _daysProcessedFrontier;
         private bool _processingFinalPacket;
         private readonly HashSet<string> _chartSeriesExceededDataPoints = new HashSet<string>();
 
@@ -149,9 +150,6 @@ namespace QuantConnect.Lean.Engine.Results
         /// </summary>
         public void Run()
         {
-            //Initialize:
-            _lastDaysProcessed = 5;
-
             //Setup minimum result arrays:
             //SampleEquity(job.periodStart, job.startingCapital);
             //SamplePerformance(job.periodStart, 0);
@@ -209,7 +207,7 @@ namespace QuantConnect.Lean.Engine.Results
                     return;
                 }
 
-                if (DateTime.UtcNow <= _nextUpdate || !(_daysProcessed > (_lastDaysProcessed + 1))) return;
+                if (DateTime.UtcNow <= _nextUpdate || _daysProcessed < _daysProcessedFrontier) return;
 
                 //Extract the orders since last update
                 var deltaOrders = new Dictionary<int, Order>();
@@ -232,7 +230,7 @@ namespace QuantConnect.Lean.Engine.Results
                 try
                 {
                     _lastUpdate = Algorithm.UtcTime.Date;
-                    _lastDaysProcessed = _daysProcessed;
+                    _daysProcessedFrontier = _daysProcessed + 1;
                     _nextUpdate = DateTime.UtcNow.AddSeconds(2);
                 }
                 catch (Exception err)
@@ -316,7 +314,7 @@ namespace QuantConnect.Lean.Engine.Results
             foreach (var chart in deltaCharts.Values)
             {
                 //Don't add packet if the series is empty:
-                if (chart.Series.Values.Sum(x => x.Values.Count) == 0) continue;
+                if (chart.Series.Values.Aggregate(0, (i, x) => i + x.Values.Count) == 0) continue;
 
                 splitPackets.Add(new BacktestResultPacket(_job, new BacktestResult
                 {
@@ -655,21 +653,24 @@ namespace QuantConnect.Lean.Engine.Results
                 foreach (var update in updates)
                 {
                     //Create the chart if it doesn't exist already:
-                    if (!Charts.ContainsKey(update.Name))
+                    Chart chart;
+                    if (!Charts.TryGetValue(update.Name, out chart))
                     {
-                        Charts.AddOrUpdate(update.Name, new Chart(update.Name));
+                        chart = new Chart(update.Name);
+                        Charts.AddOrUpdate(update.Name, chart);
                     }
+
+                    // for alpha assets chart, we always create a new series instance (step on previous value)
+                    var forceNewSeries = update.Name == ChartingInsightManagerExtension.AlphaAssets;
 
                     //Add these samples to this chart.
                     foreach (var series in update.Series.Values)
                     {
-                        //If we don't already have this record, its the first packet
-                        var chart = Charts[update.Name];
-
-                        var thisSeries = chart.TryAddAndGetSeries(series.Name, series.SeriesType, series.Index,
-                                                               series.Unit, series.Color, series.ScatterMarkerSymbol);
                         if (series.Values.Count > 0)
                         {
+                            var thisSeries = chart.TryAddAndGetSeries(series.Name, series.SeriesType, series.Index,
+                                series.Unit, series.Color, series.ScatterMarkerSymbol,
+                                forceNewSeries);
                             if (series.SeriesType == SeriesType.Pie)
                             {
                                 var dataPoint = series.ConsolidateChartPoints();
@@ -680,7 +681,7 @@ namespace QuantConnect.Lean.Engine.Results
                             }
                             else
                             {
-                                var values = chart.Series[series.Name].Values;
+                                var values = thisSeries.Values;
                                 if ((values.Count + series.Values.Count) <= _job.Controls.MaximumDataPointsPerChartSeries) // check chart data point limit first
                                 {
                                     //We already have this record, so just the new samples to the end:

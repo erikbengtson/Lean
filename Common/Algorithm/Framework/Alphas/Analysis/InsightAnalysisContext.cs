@@ -23,6 +23,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
     /// </summary>
     public class InsightAnalysisContext
     {
+        private readonly Lazy<int> _lazyHashCode;
         private DateTime _previousEvaluationTimeUtc;
         private readonly Dictionary<string, object> _contextStorage;
         private readonly TimeSpan _analysisPeriod;
@@ -110,6 +111,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
             }
 
             _analysisPeriod = AnalysisEndTimeUtc - initialValues.TimeUtc;
+            _lazyHashCode = new Lazy<int>(() => Id.GetHashCode());
         }
 
         /// <summary>
@@ -168,13 +170,13 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         /// <returns>True to proceed with analyzing this insight for the specified score type, false to skip analysis of the score type</returns>
         public bool ShouldAnalyze(InsightScoreType scoreType)
         {
-            if (scoreType == InsightScoreType.Magnitude)
+            if (Insight.Direction == InsightDirection.Flat)
+            {
+                return false;
+            }
+            else if (scoreType == InsightScoreType.Magnitude)
             {
                 return Insight.Magnitude.HasValue;
-            }
-            else if (scoreType == InsightScoreType.Direction)
-            {
-                return Insight.Direction != InsightDirection.Flat;
             }
 
             return true;
@@ -193,7 +195,7 @@ namespace QuantConnect.Algorithm.Framework.Alphas.Analysis
         /// <filterpriority>2</filterpriority>
         public override int GetHashCode()
         {
-            return Id.GetHashCode();
+            return _lazyHashCode.Value;
         }
 
         /// <summary>Determines whether the specified object is equal to the current object.</summary>
